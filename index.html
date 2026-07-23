@@ -42,6 +42,11 @@ tr.hl td{background:rgba(229,62,62,.08)}
 .conf.高{background:rgba(56,161,105,.15);color:var(--ok)}
 .conf.中{background:rgba(221,107,32,.15);color:var(--warm)}
 .conf.低{background:rgba(229,62,62,.15);color:var(--hot)}
+.cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:2px}
+.cdot.高{background:var(--ok)}
+.cdot.中{background:var(--warm)}
+.cdot.低{background:var(--hot)}
+.cdot.none{background:var(--border)}
 .pm{display:inline-block;padding:2px 8px;margin:1px;border-radius:5px;font-size:11px;text-decoration:none;border:1px solid var(--accent);color:var(--accent)}
 .pm:hover{background:var(--accent);color:#fff}
 .pm.verified::after{content:" ✓"}
@@ -109,7 +114,8 @@ function render(){
   $('#globalStats').innerHTML=
     `<div class="stat"><b>${g.cities}</b> 城市</div>
      <div class="stat"><b>${g.models}</b> 模型</div>
-     <div class="stat"><b>${DATA.base_date}</b> 基准日</div>`;
+     <div class="stat"><b>${DATA.base_date}</b> 基准日</div>
+     <div class="stat">置信 <span class="cdot 高"></span>高 <span class="cdot 中"></span>中 <span class="cdot 低"></span>低</div>`;
   let cities=[...DATA.cities];
   if(filterText){
     const f=filterText.toLowerCase();
@@ -125,7 +131,7 @@ function render(){
   const dl=DATA.days.map((d,i)=>`<th data-k="d${i}">${['今天','明天','后天'][i]}<br><span class="mini">${d.slice(5)}</span></th>`).join('');
   let html=`<table class="main"><thead><tr>
     <th class="l" data-k="order"># 城市</th>${dl}
-    <th>置信</th><th class="l">Polymarket</th>
+    <th>模型</th><th class="l">Polymarket</th>
     <th data-k="obs">最近实测</th><th>误差</th></tr></thead><tbody>`;
   for(const c of cities){
     const d=c.days;
@@ -143,8 +149,8 @@ function render(){
     const anyHot=d.some(x=>x.tmax>=38);
     html+=`<tr class="cityrow ${anyHot?'hl':''}" data-icao="${c.icao}">
       <td class="l"><b>${c.order}</b> ${esc(c.name)} <span class="mini">${c.icao}</span>${anyHot?'<span class="badge-hot">高温</span>':''}</td>
-      ${d.map(x=>`<td><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax)}</span><br><span class="mini">${unit==='C'?c2f(x.tmax)??'—':x.tmax??'—'}${unit==='C'?'F':'C'}</span></td>`).join('')}
-      <td><span class="conf ${d[0].conf||'低'}">${d[0].conf||'—'}</span><br><span class="mini">${d[0].n_models}模型</span></td>
+      ${d.map(x=>`<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax)}</span><br><span class="mini">${unit==='C'?c2f(x.tmax)??'—':x.tmax??'—'}${unit==='C'?'F':'C'}</span></td>`).join('')}
+      <td><span class="mini">${d[0].n_models}</span></td>
       <td class="l">${pm}</td>
       <td>${obsCell}</td><td>${errCell}</td></tr>`;
   }
