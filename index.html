@@ -94,6 +94,17 @@ const c2f=c=>c==null?null:+(c*9/5+32).toFixed(1);
 const fmtT=c=>c==null?'—':(unit==='C'?c.toFixed(1)+'°':c2f(c).toFixed(1)+'°');
 const fmtTn=c=>c==null?'—':(unit==='C'?c.toFixed(1):c2f(c).toFixed(1));
 const esc=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+// UTC ISO 时间(含 Z) → 北京时间(UTC+8) 字符串：2026-07-24 17:41:54
+const toBeijing=s=>{
+  if(!s)return '—';
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if(!m)return s;
+  const Y=+m[1],Mo=+m[2],D=+m[3],H=+m[4],Min=+m[5],S=m[6]?+m[6]:0;
+  const d=new Date(Date.UTC(Y,Mo-1,D,H,Min,S));
+  d.setUTCHours(d.getUTCHours()+8);
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+};
 const errCls=e=>Math.abs(e)<=1?'err-ok':(Math.abs(e)<=2?'err-mid':'err-bad');
 const heatCls=c=>c>=38?'hot':(c>=33?'warm':'');
 
@@ -102,7 +113,7 @@ async function load(){
     const r=await fetch('data.json?t='+Date.now());
     DATA=await r.json();
     render();
-    $('#updatetime').textContent='数据: '+DATA.generated_at+' · 每5分钟自动刷新';
+    $('#updatetime').textContent='数据更新: '+toBeijing(DATA.generated_at)+' 北京时间 · 每5分钟自动刷新';
   }catch(e){
     $('#updatetime').textContent='数据加载失败: '+e.message;
   }
@@ -235,8 +246,8 @@ function evoChart(evo,dateStr){
   const dots=pts.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="2.5" fill="var(--accent)"><title>${evo[i].slot}: ${evo[i].median}°C (${evo[i].n}模型)</title></circle>`).join('');
   return `<div class="evo"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
     <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
-    <text x="${P}" y="${H-1}" font-size="8" fill="var(--muted)">${evo[0].slot.slice(5,-3)}</text>
-    <text x="${W-P}" y="${H-1}" font-size="8" fill="var(--muted)" text-anchor="end">${evo[evo.length-1].slot.slice(5,-3)}</text>
+    <text x="${P}" y="${H-1}" font-size="8" fill="var(--muted)">${toBeijing(evo[0].slot).slice(5,16)}</text>
+    <text x="${W-P}" y="${H-1}" font-size="8" fill="var(--muted)" text-anchor="end">${toBeijing(evo[evo.length-1].slot).slice(5,16)}</text>
   </svg><div class="legend">快照演化 ${mn.toFixed(1)}~${mx.toFixed(1)}°C</div></div>`;
 }
 
