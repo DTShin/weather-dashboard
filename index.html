@@ -153,7 +153,7 @@ function render(){
   const dl=DATA.days.map((d,i)=>`<th data-k="d${i}">${['今天','明天','后天'][i]}<br><span class="mini">${d.slice(5)}</span></th>`).join('');
   let html=`<table class="main"><thead><tr>
     <th class="l" data-k="order"># 城市</th>${dl}
-    <th title="Polymarket 实时：预测最高温对应档位（°C）的 Yes 概率，由浏览器直连获取">Polymarket<br><span class="mini">实时价(对应档位)</span></th>
+    <th title="Polymarket 实时：预测最高温对应档位（°C）的 Yes 概率。由 GitHub Actions 云端每15分钟抓取，浏览器每60秒拉取同源静态 JSON">Polymarket<br><span class="mini">实时价(对应档位)</span></th>
     <th>模型</th><th class="l">Polymarket</th>
     <th data-k="obs">最近实测</th><th>误差</th></tr></thead><tbody>`;
   for(const c of cities){
@@ -178,9 +178,8 @@ function render(){
       <td class="l">${pm}</td>
       <td>${obsCell}</td><td>${errCell}</td></tr>`;
   }
-  html+='</tbody></table><p class="mini" style="margin-top:8px">📡 Polymarket 实时价格由你的浏览器直连 <code>gamma-api.polymarket.com</code> 获取，每 60 秒自动刷新；若所在网络无法访问 Polymarket 则对应单元格显示 ⚠。</p>';
+  html+='</tbody></table><p class="mini" style="margin-top:8px">📡 Polymarket 实时价格由 <b>GitHub Actions 云端每 15 分钟抓取</b>并生成同源 <code>polymarket_prices.json</code>，浏览器每 60 秒拉取静态 JSON 显示（不依赖本机网络）；云端缺失时浏览器直连兜底，仍失败则显示 ⚠。</p>';
   $('#tableWrap').innerHTML=html;
-  paintCachedPM();
   document.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
     const k=th.dataset.k;
     if(sortKey===k)sortAsc=!sortAsc;else{sortKey=k;sortAsc=true;}
@@ -268,6 +267,8 @@ function evoChart(evo,dateStr){
 }
 
 // ===== Polymarket 实时价格（浏览器直连 gamma-api，CORS 需 *）=====
+let PM={};
+let PM_BY_SLUG={};
 const _pmCache={};
 const slugOf=pmUrl=>pmUrl?(pmUrl.split('/event/')[1]||''):'';
 function degFromQuestion(q){
@@ -318,32 +319,68 @@ function paintPMLiveCell(c,parsed,tmax){
   c.innerHTML=`<span class="pm-live"><span class="pm-pill">${pct}% @${best.degree}°C</span><div class="pm-bar" style="width:${barW}px"></div></span>`;
   c.title=`${parsed.title||''}\n预测 ${tmax!=null?tmax+'°C':'—'} → 对应 ${best.degree}°C 档，Yes 概率 ${pct}%`;
 }
-function paintCachedPM(){
-  document.querySelectorAll('.pm-live-cell').forEach(c=>{
-    const slug=c.dataset.slug;if(!slug)return;
-    const e=_pmCache[slug];if(!e||!e.data.ok)return;
-    paintPMLiveCell(c,e.data.parsed,parseFloat(c.dataset.tmax));
-  });
+function paintJSONCell(c,entry,tmax){
+  if(entry.error){c.innerHTML=`<span class="pm-err">⚠ ${entry.error}</span>`;return;}
+  const ms=entry.markets||[];
+  if(!ms.length){c.innerHTML='<span class="pm-err">无市场</span>';return;}
+  const best=entry.best_bin||bestBin(ms,tmax);
+  if(!best){c.innerHTML='<span class="pm-err">无价格</span>';return;}
+  const pct=Math.round(best.p_yes*100);
+  const barW=Math.max(2,Math.round(best.p_yes*46));
+  const tag=entry.resolved?' ✓':'';
+  c.innerHTML=`<span class="pm-live"><span class="pm-pill">${pct}% @${best.degree}°C${tag}</span><div class="pm-bar" style="width:${barW}px"></div></span>`;
+  c.title=`${entry.title||''}\n预测 ${tmax!=null?tmax+'°C':'—'} → 对应 ${best.degree}°C 档，Yes 概率 ${pct}%`;
+}
+function buildPmIndex(){
+  PM_BY_SLUG={};
+  const cs=PM&&PM.cities||{};
+  for(const icao in cs){
+    const days=cs[icao].days||{};
+    for(const date in days){
+      const e=days[date];
+      if(e&&e.slug)PM_BY_SLUG[e.slug]=e;
+    }
+  }
+}
+async function loadPM(){
+  try{
+    const r=await fetch('polymarket_prices.json?t='+Date.now(),{cache:'no-store'});
+    if(r.ok){PM=await r.json();buildPmIndex();}
+  }catch(e){PM={};}
 }
 async function refreshPolymarket(){
+  await loadPM();
   const cells=[...document.querySelectorAll('.pm-live-cell')].filter(c=>c.dataset.slug);
+  for(const c of cells){
+    const e=PM_BY_SLUG[c.dataset.slug];
+    if(e&&e.best_bin)paintJSONCell(c,e,parseFloat(c.dataset.tmax));
+  }
+  const miss=cells.filter(c=>{const e=PM_BY_SLUG[c.dataset.slug];return !(e&&e.best_bin);});
   let i=0;
-  const step=async()=>{
-    while(i<cells.length){
-      const c=cells[i++];
-      const res=await fetchPM(c.dataset.slug);
-      if(res.ok)paintPMLiveCell(c,res.parsed,parseFloat(c.dataset.tmax));
-      else c.innerHTML=`<span class="pm-err">⚠ ${res.error||'获取失败'}</span>`;
-    }
-  };
+  const step=async()=>{while(i<miss.length){const c=miss[i++];const res=await fetchPM(c.dataset.slug);if(res.ok)paintPMLiveCell(c,res.parsed,parseFloat(c.dataset.tmax));else c.innerHTML=`<span class="pm-err">⚠ ${res.error||'获取失败'}</span>`;}};
   const workers=[];for(let k=0;k<6;k++)workers.push(step());
   await Promise.all(workers);
-  const el=document.getElementById('pmStatus');if(el)el.textContent='价格更新: '+new Date().toLocaleTimeString();
+  const el=document.getElementById('pmStatus');
+  if(el){
+    const ts=PM&&PM.generated_at?toBeijing(PM.generated_at).slice(5):'—';
+    el.textContent='PM价格(云端): '+ts+' · JSON '+(Object.keys(PM_BY_SLUG).length?'✓':'✗');
+  }
 }
 async function refreshDrawerPM(icao,i,pmUrl,tmax){
   const el=document.getElementById('pmdist-'+icao+'-'+i);
   if(!el||!pmUrl)return;
-  const res=await fetchPM(slugOf(pmUrl));
+  const slug=slugOf(pmUrl);
+  const e=PM_BY_SLUG[slug];
+  if(e){
+    if(e.error){el.innerHTML=`<span class="pm-err">⚠ ${e.error}</span>`;return;}
+    const ms=e.markets||[];
+    if(!ms.length){el.innerHTML='<span class="pm-err">无市场</span>';return;}
+    const best=e.best_bin||bestBin(ms,tmax);
+    el.innerHTML='<div class="mini" style="margin-bottom:3px">Polymarket 各档最高温概率'+(tmax!=null?`（预测 ${tmax}°C → 高亮 ${best.degree}°C）`:'')+'</div>'+
+      ms.map(m=>`<span class="d ${m.degree===best.degree?'hit':''}" title="Yes ${Math.round(m.p_yes*100)}% · bid ${m.bestBid??'—'} / ask ${m.bestAsk??'—'}">${m.degree}° ${Math.round(m.p_yes*100)}%</span>`).join('');
+    return;
+  }
+  const res=await fetchPM(slug);
   if(!res.ok){el.innerHTML=`<span class="pm-err">⚠ ${res.error||'获取失败'}</span>`;return;}
   const ms=res.parsed.markets;
   if(!ms.length){el.innerHTML='<span class="pm-err">无市场</span>';return;}
