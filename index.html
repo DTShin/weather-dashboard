@@ -75,6 +75,17 @@ h3.sec{margin:18px 0 8px;font-size:14px;border-left:3px solid var(--accent);padd
 .pm-bar{height:4px;border-radius:2px;background:var(--accent);min-width:2px}
 .mini-note{font-size:10px;color:var(--muted)}
 .pm-err{font-size:10px;color:var(--warm)}
+/* 降雨状态图标：研判温度后，高温时段持续降雨时显示 */
+.rain-ico{display:inline-block;margin-left:3px;font-size:13px;vertical-align:middle;cursor:help;filter:drop-shadow(0 0 1px var(--accent))}
+.rain-ico.soft{opacity:.5}
+/* 城市外链按钮（Wunderground / METAR / Windy） */
+.extbtns{display:flex;gap:3px;flex-wrap:nowrap}
+.ext{display:inline-flex;align-items:center;justify-content:center;width:22px;height:20px;border-radius:5px;font-size:11px;font-weight:700;text-decoration:none;border:1px solid var(--border);background:var(--bg);color:var(--fg);line-height:1}
+.ext:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.ext.wu{color:#1a73e8}
+.ext.metar{color:#d9822b}
+.ext.windy{color:#e0405a}
+.ext:hover{color:#fff}
 .pmday{display:flex;align-items:center;gap:4px;padding:1px 0}
 .pmday.disabled{opacity:.4}
 .pmday .dl{font-size:9px;font-weight:700;color:var(--muted);min-width:24px;text-align:right;letter-spacing:.3px}
@@ -143,6 +154,31 @@ const toBeijing=s=>{
 };
 const errCls=e=>Math.abs(e)<=1?'err-ok':(Math.abs(e)<=2?'err-mid':'err-bad');
 const heatCls=c=>c>=38?'hot':(c>=33?'warm':'');
+// 降雨状态：高温时段(本地11–17时)持续降雨概率；sustained 才显示图标
+function rainHtml(x){
+  const r=x.rain;
+  if(!r)return '';
+  if(r.sustained){
+    return `<span class="rain-ico" title="🌧 高温时段(本地 11–17 时)持续降雨概率：峰值 ${r.peak_prob}% · 均值 ${r.mean_prob}%">🌧️</span>`;
+  }
+  if(r.peak_prob>=50 && r.mean_prob>=30){
+    return `<span class="rain-ico soft" title="有降雨可能(非持续)：峰值 ${r.peak_prob}% · 均值 ${r.mean_prob}%">🌦️</span>`;
+  }
+  return '';
+}
+// 每城市三个外链：Wunderground / AviationWeather METAR / Windy 雷达
+function extLinks(c){
+  const icao=c.icao, lat=c.lat, lon=c.lon;
+  const wu=`https://preview.wunderground.com/weather/${icao}`;
+  const metar=`https://aviationweather.gov/data/metar/?ids=${icao}&hours=6`;
+  const windy=`https://www.windy.com/station/ad-${icao}?radar,${lat},${lon},8,p:cams`;
+  const stop='onclick="event.stopPropagation()"';
+  return `<div class="extbtns">
+    <a class="ext wu" href="${wu}" target="_blank" ${stop} title="Wunderground 天气 (${icao})">W</a>
+    <a class="ext metar" href="${metar}" target="_blank" ${stop} title="AviationWeather METAR (${icao}, 近6h)">✈</a>
+    <a class="ext windy" href="${windy}" target="_blank" ${stop} title="Windy 雷达 (${icao})">🌀</a>
+  </div>`;
+}
 
 async function load(){
   try{
@@ -180,7 +216,7 @@ function render(){
   let html=`<table class="main"><thead><tr>
     <th class="l" data-k="order"># 城市</th>${dl}
     <th title="Polymarket 实时：预测最高温对应档位（按市场温标 °C/°F）的 Yes 概率。D0/D+1/D+2 三天并列显示。优先读云端同源 JSON，缺失时浏览器直连兜底">Polymarket<br><span class="mini">实时价(D0/D+1/D+2)</span></th>
-    <th>模型</th><th class="l">Polymarket</th>
+    <th>模型</th><th class="l">Polymarket</th><th>外链</th>
     <th data-k="obs">最近实测</th><th>误差</th></tr></thead><tbody>`;
   for(const c of cities){
     const d=c.days;
@@ -198,10 +234,11 @@ function render(){
     const anyHot=d.some(x=>x.tmax>=38);
     html+=`<tr class="cityrow ${anyHot?'hl':''}" data-icao="${c.icao}">
       <td class="l"><b>${c.order}</b> ${esc(c.name)} <span class="mini">${c.icao}</span>${anyHot?'<span class="badge-hot">高温</span>':''}</td>
-      ${d.map(x=>`<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax, x.tmax_disp, c.unit)}</span><br><span class="mini">${altUnit(x.tmax, c.unit)}</span></td>`).join('')}
+      ${d.map(x=>`<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax, x.tmax_disp, c.unit)}</span>${rainHtml(x)}<br><span class="mini">${altUnit(x.tmax, c.unit)}</span></td>`).join('')}
       <td class="pm-live-cell">${d.map((x,i)=>x.pm_url?`<div class="pmday" data-slug="${slugOf(x.pm_url)}" data-tmax="${x.tmax??''}" title="${['今天','明天','后天'][i]} ${x.date}"><span class="dl">${['D0','D+1','D+2'][i]}</span><span class="pm-live"><span class="mini">加载中…</span></span></div>`:`<div class="pmday disabled"><span class="dl">${['D0','D+1','D+2'][i]}</span><span class="pm-live"><span class="mini">无市场</span></span></div>`).join('')}</td>
       <td><span class="mini">${d[0].n_models}</span></td>
       <td class="l">${pm}</td>
+      <td>${extLinks(c)}</td>
       <td>${obsCell}</td><td>${errCell}</td></tr>`;
   }
   html+='</tbody></table><p class="mini" style="margin-top:8px">📡 Polymarket 实时价格由 <b>GitHub Actions 云端每 15 分钟抓取</b>并生成同源 <code>polymarket_prices.json</code>，浏览器每 60 秒拉取静态 JSON 显示（不依赖本机网络）；云端缺失时浏览器直连兜底，仍失败则显示 ⚠。</p>';
@@ -222,7 +259,7 @@ function openDrawer(icao){
     return `<div class="daycard">
       <div class="dc-label">${['今天 D0','明天 D+1','后天 D+2'][i]}</div>
       <div class="dc-date">${d.date}</div>
-      <div class="dc-temp ${heatCls(d.tmax)}">${fmtT(d.tmax, d.tmax_disp, c.unit)}</div>
+      <div class="dc-temp ${heatCls(d.tmax)}">${fmtT(d.tmax, d.tmax_disp, c.unit)} ${rainHtml(d)}</div>
       <div class="dc-f">${altUnit(d.tmax, c.unit)}</div>
       <div style="margin:6px 0"><span class="conf ${d.conf||'低'}">置信度 ${d.conf||'—'}</span></div>
       <div class="mini">融合 ${d.n_models} 个模型（偏差修正后中位数）</div>
