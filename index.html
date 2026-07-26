@@ -153,7 +153,7 @@ function render(){
   const dl=DATA.days.map((d,i)=>`<th data-k="d${i}">${['今天','明天','后天'][i]}<br><span class="mini">${d.slice(5)}</span></th>`).join('');
   let html=`<table class="main"><thead><tr>
     <th class="l" data-k="order"># 城市</th>${dl}
-    <th title="Polymarket 实时：预测最高温对应档位（°C）的 Yes 概率。由 GitHub Actions 云端每15分钟抓取，浏览器每60秒拉取同源静态 JSON">Polymarket<br><span class="mini">实时价(对应档位)</span></th>
+    <th title="Polymarket 实时：预测最高温对应档位（按市场温标 °C/°F）的 Yes 概率。优先读云端同源 JSON，缺失时浏览器直连兜底">Polymarket<br><span class="mini">实时价(对应档位)</span></th>
     <th>模型</th><th class="l">Polymarket</th>
     <th data-k="obs">最近实测</th><th>误差</th></tr></thead><tbody>`;
   for(const c of cities){
@@ -271,10 +271,23 @@ let PM={};
 let PM_BY_SLUG={};
 const _pmCache={};
 const slugOf=pmUrl=>pmUrl?(pmUrl.split('/event/')[1]||''):'';
-function degFromQuestion(q){
+function degInfo(q){
   if(!q)return null;
-  const m=q.match(/(\d+)\s*°?\s*C/i);
-  return m?parseInt(m[1],10):null;
+  // 区间: between 80-81°F / between 12-13°C
+  let m=q.match(/between\s+(\d+)\s*[-–]\s*(\d+)\s*°?\s*([CF])/i);
+  if(m){
+    const a=parseFloat(m[1]), b=parseFloat(m[2]), unit=m[3].toUpperCase();
+    const loC=unit==='F'?(a-32)*5/9:a, hiC=unit==='F'?(b-32)*5/9:b;
+    return {unit, label:`${a}-${b}°${unit}`, loC, hiC, repC:(loC+hiC)/2, isRange:true};
+  }
+  // 单值: 12°C / 79°F or below / 98°F or higher
+  m=q.match(/(\d+)\s*°?\s*([CF])\b\s*(?:or\s+(below|higher))?/i);
+  if(m){
+    const v=parseFloat(m[1]), unit=m[2].toUpperCase();
+    const below=/below/i.test(m[3]||''), higher=/higher/i.test(m[3]||'');
+    return {unit, label:`${v}°${unit}`, repC, loC:below?-300:repC, hiC:higher?300:repC, isRange:false};
+  }
+  return null;
 }
 function parsePMEvent(ev){
   if(!ev||!ev.markets)return{ok:false,error:'no markets'};
@@ -284,8 +297,10 @@ function parsePMEvent(ev){
     try{prices=JSON.parse(m.outcomePrices||'[]');}catch(e){}
     const yi=outcomes.indexOf('Yes');
     const pYes=yi>=0&&prices[yi]!=null?parseFloat(prices[yi]):null;
-    return{degree:degFromQuestion(m.question),p_yes:pYes,bestBid:m.bestBid,bestAsk:m.bestAsk,lastTradePrice:m.lastTradePrice};
-  }).filter(m=>m.degree!=null&&m.p_yes!=null).sort((a,b)=>a.degree-b.degree);
+    const di=degInfo(m.question);
+    if(!di||pYes==null)return null;
+    return{label:di.label,unit:di.unit,repC:di.repC,loC:di.loC,hiC:di.hiC,isRange:di.isRange,p_yes:pYes,bestBid:m.bestBid,bestAsk:m.bestAsk,lastTradePrice:m.lastTradePrice};
+  }).filter(Boolean).sort((a,b)=>a.repC-b.repC);
   return{ok:true,title:ev.title,resolved:!!ev.automaticallyResolved,markets};
 }
 async function fetchPM(slug){
@@ -307,8 +322,13 @@ async function fetchPM(slug){
 }
 function bestBin(markets,tmax){
   if(!markets||!markets.length)return null;
-  let best=markets[0],bd=Math.abs(markets[0].degree-(tmax||0));
-  for(const m of markets){const d=Math.abs(m.degree-(tmax||0));if(d<bd){bd=d;best=m;}}
+  tmax=tmax==null?null:tmax;
+  if(tmax!=null){
+    const inside=markets.find(m=>(m.loC==null||tmax>=m.loC)&&(m.hiC==null||tmax<=m.hiC));
+    if(inside)return inside;
+  }
+  let best=markets[0],bd=Math.abs(markets[0].repC-(tmax||0));
+  for(const m of markets){const d=Math.abs(m.repC-(tmax||0));if(d<bd){bd=d;best=m;}}
   return best;
 }
 function paintPMLiveCell(c,parsed,tmax){
@@ -316,8 +336,8 @@ function paintPMLiveCell(c,parsed,tmax){
   if(!best){c.innerHTML='<span class="pm-err">无价格</span>';return;}
   const pct=Math.round(best.p_yes*100);
   const barW=Math.max(2,Math.round(best.p_yes*46));
-  c.innerHTML=`<span class="pm-live"><span class="pm-pill">${pct}% @${best.degree}°C</span><div class="pm-bar" style="width:${barW}px"></div></span>`;
-  c.title=`${parsed.title||''}\n预测 ${tmax!=null?tmax+'°C':'—'} → 对应 ${best.degree}°C 档，Yes 概率 ${pct}%`;
+  c.innerHTML=`<span class="pm-live"><span class="pm-pill">${pct}% @${best.label}</span><div class="pm-bar" style="width:${barW}px"></div></span>`;
+  c.title=`${parsed.title||''}\n预测 ${tmax!=null?tmax+'°C':'—'} → 对应 ${best.label} 档，Yes 概率 ${pct}%`;
 }
 function paintJSONCell(c,entry,tmax){
   if(entry.error){c.innerHTML=`<span class="pm-err">⚠ ${entry.error}</span>`;return;}
@@ -325,11 +345,12 @@ function paintJSONCell(c,entry,tmax){
   if(!ms.length){c.innerHTML='<span class="pm-err">无市场</span>';return;}
   const best=entry.best_bin||bestBin(ms,tmax);
   if(!best){c.innerHTML='<span class="pm-err">无价格</span>';return;}
+  const lbl=best.label!=null?best.label:(best.degree!=null?best.degree+'°C':'?');
   const pct=Math.round(best.p_yes*100);
   const barW=Math.max(2,Math.round(best.p_yes*46));
   const tag=entry.resolved?' ✓':'';
-  c.innerHTML=`<span class="pm-live"><span class="pm-pill">${pct}% @${best.degree}°C${tag}</span><div class="pm-bar" style="width:${barW}px"></div></span>`;
-  c.title=`${entry.title||''}\n预测 ${tmax!=null?tmax+'°C':'—'} → 对应 ${best.degree}°C 档，Yes 概率 ${pct}%`;
+  c.innerHTML=`<span class="pm-live"><span class="pm-pill">${pct}% @${lbl}${tag}</span><div class="pm-bar" style="width:${barW}px"></div></span>`;
+  c.title=`${entry.title||''}\n预测 ${tmax!=null?tmax+'°C':'—'} → 对应 ${lbl} 档，Yes 概率 ${pct}%`;
 }
 function buildPmIndex(){
   PM_BY_SLUG={};
@@ -376,8 +397,8 @@ async function refreshDrawerPM(icao,i,pmUrl,tmax){
     const ms=e.markets||[];
     if(!ms.length){el.innerHTML='<span class="pm-err">无市场</span>';return;}
     const best=e.best_bin||bestBin(ms,tmax);
-    el.innerHTML='<div class="mini" style="margin-bottom:3px">Polymarket 各档最高温概率'+(tmax!=null?`（预测 ${tmax}°C → 高亮 ${best.degree}°C）`:'')+'</div>'+
-      ms.map(m=>`<span class="d ${m.degree===best.degree?'hit':''}" title="Yes ${Math.round(m.p_yes*100)}% · bid ${m.bestBid??'—'} / ask ${m.bestAsk??'—'}">${m.degree}° ${Math.round(m.p_yes*100)}%</span>`).join('');
+    el.innerHTML='<div class="mini" style="margin-bottom:3px">Polymarket 各档最高温概率'+(tmax!=null?`（预测 ${tmax}°C → 高亮 ${best.label}）`:'')+'</div>'+
+      ms.map(m=>`<span class="d ${m.label===best.label?'hit':''}" title="Yes ${Math.round(m.p_yes*100)}% · bid ${m.bestBid??'—'} / ask ${m.bestAsk??'—'}">${m.label} ${Math.round(m.p_yes*100)}%</span>`).join('');
     return;
   }
   const res=await fetchPM(slug);
@@ -385,8 +406,8 @@ async function refreshDrawerPM(icao,i,pmUrl,tmax){
   const ms=res.parsed.markets;
   if(!ms.length){el.innerHTML='<span class="pm-err">无市场</span>';return;}
   const best=bestBin(ms,tmax);
-  el.innerHTML='<div class="mini" style="margin-bottom:3px">Polymarket 各档最高温概率'+(tmax!=null?`（预测 ${tmax}°C → 高亮 ${best.degree}°C）`:'')+'</div>'+
-    ms.map(m=>`<span class="d ${m.degree===best.degree?'hit':''}" title="Yes ${Math.round(m.p_yes*100)}% · bid ${m.bestBid??'—'} / ask ${m.bestAsk??'—'}">${m.degree}° ${Math.round(m.p_yes*100)}%</span>`).join('');
+  el.innerHTML='<div class="mini" style="margin-bottom:3px">Polymarket 各档最高温概率'+(tmax!=null?`（预测 ${tmax}°C → 高亮 ${best.label}）`:'')+'</div>'+
+    ms.map(m=>`<span class="d ${m.label===best.label?'hit':''}" title="Yes ${Math.round(m.p_yes*100)}% · bid ${m.bestBid??'—'} / ask ${m.bestAsk??'—'}">${m.label} ${Math.round(m.p_yes*100)}%</span>`).join('');
 }
 
 $('#search').oninput=e=>{filterText=e.target.value.trim();render();};
