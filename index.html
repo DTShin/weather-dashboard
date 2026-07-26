@@ -75,6 +75,10 @@ h3.sec{margin:18px 0 8px;font-size:14px;border-left:3px solid var(--accent);padd
 .pm-bar{height:4px;border-radius:2px;background:var(--accent);min-width:2px}
 .mini-note{font-size:10px;color:var(--muted)}
 .pm-err{font-size:10px;color:var(--warm)}
+.pmday{display:flex;align-items:center;gap:4px;padding:1px 0}
+.pmday.disabled{opacity:.4}
+.pmday .dl{font-size:9px;font-weight:700;color:var(--muted);min-width:24px;text-align:right;letter-spacing:.3px}
+.pmday .pm-live{flex:1}
 .dist{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px;max-width:640px}
 .dist .d{font-size:10px;padding:1px 5px;border-radius:4px;border:1px solid var(--border);color:var(--muted);cursor:default}
 .dist .d.hit{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
@@ -153,7 +157,7 @@ function render(){
   const dl=DATA.days.map((d,i)=>`<th data-k="d${i}">${['今天','明天','后天'][i]}<br><span class="mini">${d.slice(5)}</span></th>`).join('');
   let html=`<table class="main"><thead><tr>
     <th class="l" data-k="order"># 城市</th>${dl}
-    <th title="Polymarket 实时：预测最高温对应档位（按市场温标 °C/°F）的 Yes 概率。优先读云端同源 JSON，缺失时浏览器直连兜底">Polymarket<br><span class="mini">实时价(对应档位)</span></th>
+    <th title="Polymarket 实时：预测最高温对应档位（按市场温标 °C/°F）的 Yes 概率。D0/D+1/D+2 三天并列显示。优先读云端同源 JSON，缺失时浏览器直连兜底">Polymarket<br><span class="mini">实时价(D0/D+1/D+2)</span></th>
     <th>模型</th><th class="l">Polymarket</th>
     <th data-k="obs">最近实测</th><th>误差</th></tr></thead><tbody>`;
   for(const c of cities){
@@ -173,7 +177,7 @@ function render(){
     html+=`<tr class="cityrow ${anyHot?'hl':''}" data-icao="${c.icao}">
       <td class="l"><b>${c.order}</b> ${esc(c.name)} <span class="mini">${c.icao}</span>${anyHot?'<span class="badge-hot">高温</span>':''}</td>
       ${d.map(x=>`<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax)}</span><br><span class="mini">${unit==='C'?c2f(x.tmax)??'—':x.tmax??'—'}${unit==='C'?'F':'C'}</span></td>`).join('')}
-      ${d[0].pm_url?`<td id="pmlive-${c.icao}" class="pm-live-cell" data-slug="${slugOf(d[0].pm_url)}" data-tmax="${d[0].tmax??''}"><span class="mini">价格加载中…</span></td>`:`<td class="pm-live-cell"><span class="mini">无对应市场</span></td>`}
+      <td class="pm-live-cell">${d.map((x,i)=>x.pm_url?`<div class="pmday" data-slug="${slugOf(x.pm_url)}" data-tmax="${x.tmax??''}" title="${['今天','明天','后天'][i]} ${x.date}"><span class="dl">${['D0','D+1','D+2'][i]}</span><span class="pm-live"><span class="mini">加载中…</span></span></div>`:`<div class="pmday disabled"><span class="dl">${['D0','D+1','D+2'][i]}</span><span class="pm-live"><span class="mini">无市场</span></span></div>`).join('')}</td>
       <td><span class="mini">${d[0].n_models}</span></td>
       <td class="l">${pm}</td>
       <td>${obsCell}</td><td>${errCell}</td></tr>`;
@@ -333,24 +337,26 @@ function bestBin(markets,tmax){
   return best;
 }
 function paintPMLiveCell(c,parsed,tmax){
+  const box=c.querySelector('.pm-live')||c;
   const best=bestBin(parsed.markets,tmax);
-  if(!best){c.innerHTML='<span class="pm-err">无价格</span>';return;}
+  if(!best){box.innerHTML='<span class="pm-err">无价格</span>';return;}
   const pct=Math.round(best.p_yes*100);
   const barW=Math.max(2,Math.round(best.p_yes*46));
-  c.innerHTML=`<span class="pm-live"><span class="pm-pill">${pct}% @${best.label}</span><div class="pm-bar" style="width:${barW}px"></div></span>`;
+  box.innerHTML=`<span class="pm-pill">${pct}% @${best.label}</span><div class="pm-bar" style="width:${barW}px"></div>`;
   c.title=`${parsed.title||''}\n预测 ${tmax!=null?tmax+'°C':'—'} → 对应 ${best.label} 档，Yes 概率 ${pct}%`;
 }
 function paintJSONCell(c,entry,tmax){
-  if(entry.error){c.innerHTML=`<span class="pm-err">⚠ ${entry.error}</span>`;return;}
+  const box=c.querySelector('.pm-live')||c;
+  if(entry.error){box.innerHTML=`<span class="pm-err">⚠ ${entry.error}</span>`;return;}
   const ms=entry.markets||[];
-  if(!ms.length){c.innerHTML='<span class="pm-err">无市场</span>';return;}
+  if(!ms.length){box.innerHTML='<span class="pm-err">无市场</span>';return;}
   const best=entry.best_bin||bestBin(ms,tmax);
-  if(!best){c.innerHTML='<span class="pm-err">无价格</span>';return;}
+  if(!best){box.innerHTML='<span class="pm-err">无价格</span>';return;}
   const lbl=best.label!=null?best.label:(best.degree!=null?best.degree+'°C':'?');
   const pct=Math.round(best.p_yes*100);
   const barW=Math.max(2,Math.round(best.p_yes*46));
   const tag=entry.resolved?' ✓':'';
-  c.innerHTML=`<span class="pm-live"><span class="pm-pill">${pct}% @${lbl}${tag}</span><div class="pm-bar" style="width:${barW}px"></div></span>`;
+  box.innerHTML=`<span class="pm-pill">${pct}% @${lbl}${tag}</span><div class="pm-bar" style="width:${barW}px"></div>`;
   c.title=`${entry.title||''}\n预测 ${tmax!=null?tmax+'°C':'—'} → 对应 ${lbl} 档，Yes 概率 ${pct}%`;
 }
 function buildPmIndex(){
@@ -372,7 +378,7 @@ async function loadPM(){
 }
 async function refreshPolymarket(){
   await loadPM();
-  const cells=[...document.querySelectorAll('.pm-live-cell')].filter(c=>c.dataset.slug);
+  const cells=[...document.querySelectorAll('.pmday')].filter(c=>c.dataset.slug);
   for(const c of cells){
     const e=PM_BY_SLUG[c.dataset.slug];
     if(e&&e.best_bin)paintJSONCell(c,e,parseFloat(c.dataset.tmax));
