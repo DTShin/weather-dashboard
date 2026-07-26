@@ -93,7 +93,7 @@ h3.sec{margin:18px 0 8px;font-size:14px;border-left:3px solid var(--accent);padd
   <span class="updatetime" id="pmStatus"></span>
   <button class="btn" id="pmBtn" title="立即刷新 Polymarket 实时价格">🔄 价格</button>
   <input id="search" placeholder="搜索城市 / ICAO…">
-  <button class="btn" id="unitBtn">°C</button>
+  <button class="btn" id="unitBtn">按城市</button>
   <button class="btn" id="darkBtn">🌙</button>
 </header>
 <main>
@@ -102,11 +102,33 @@ h3.sec{margin:18px 0 8px;font-size:14px;border-left:3px solid var(--accent);padd
 <div id="overlay" onclick="closeDrawer()"></div>
 <div id="drawer"></div>
 <script>
-let DATA=null, unit='C', sortKey='order', sortAsc=true, filterText='';
+let DATA=null, unitMode='P', sortKey='order', sortAsc=true, filterText='';
 const $=s=>document.querySelector(s);
 const c2f=c=>c==null?null:+(c*9/5+32).toFixed(1);
-const fmtT=c=>c==null?'—':(unit==='C'?c.toFixed(1)+'°':c2f(c).toFixed(1)+'°');
-const fmtTn=c=>c==null?'—':(unit==='C'?c.toFixed(1):c2f(c).toFixed(1));
+// 单位模式：P=按城市 Polymarket 档位（美国°F/其余°C）；C=强制°C；F=强制°F
+const dispUnit=cityUnit=>unitMode==='P'?cityUnit:(unitMode==='C'?'C':'F');
+// 展示整数温度：vC=°C 原始值；dispInt=该城市单位下已取整值（Polymarket 模式优先用，保证整数）
+function fmtT(vC, dispInt, cityUnit){
+  if(vC==null&&dispInt==null)return '—';
+  const u=dispUnit(cityUnit);
+  if(u==='F'){
+    const base=vC!=null?vC:(dispInt!=null?(cityUnit==='F'?dispInt:(dispInt-32)*5/9):null);
+    return Math.round(base*9/5+32)+'°F';
+  }
+  const base=vC!=null?vC:(dispInt!=null?(cityUnit==='C'?dispInt:dispInt*9/5+32):null);
+  return Math.round(base)+'°C';
+}
+// 副单位（与展示单位相反）
+function altUnit(vC, cityUnit){
+  if(vC==null)return '—';
+  const u=dispUnit(cityUnit);
+  return u==='F'?Math.round(vC)+'°C':Math.round(vC*9/5+32)+'°F';
+}
+// 误差（按当前展示单位）
+function errDisp(eC, cityUnit){
+  const u=dispUnit(cityUnit);
+  return u==='F'?eC*9/5:eC;
+}
 const esc=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 // UTC ISO 时间(含 Z) → 北京时间(UTC+8) 字符串：2026-07-24 17:41:54
 const toBeijing=s=>{
@@ -165,18 +187,18 @@ function render(){
     const obs=c.obs[0];
     let obsCell='—',errCell='—';
     if(obs){
-      obsCell=`<span class="temp">${fmtT(obs.tmax)}</span><br><span class="mini">${obs.date.slice(5)}</span>`;
+      obsCell=`<span class="temp">${fmtT(obs.tmax, obs.tmax_disp, c.unit)}</span><br><span class="mini">${obs.date.slice(5)}</span>`;
       const pd=d.find(x=>x.date===obs.date);
       if(pd&&pd.tmax!=null){
-        const e=pd.tmax-obs.tmax;
-        errCell=`<span class="${errCls(e)}">${e>0?'+':''}${e.toFixed(1)}°</span>`;
+        const e=errDisp(pd.tmax-obs.tmax, c.unit);
+        errCell=`<span class="${errCls(e)}">${e>0?'+':''}${e.toFixed(0)}°</span>`;
       }
     }
     const pm=d.map((x,i)=>x.pm_url?`<a class="pm ${x.pm_verified?'verified':''}" href="${x.pm_url}" target="_blank" title="${['今天','明天','后天'][i]} ${x.date}">${['D0','D+1','D+2'][i]}</a>`:`<span class="pm disabled">D${i>0?'+'+i:0}</span>`).join('');
     const anyHot=d.some(x=>x.tmax>=38);
     html+=`<tr class="cityrow ${anyHot?'hl':''}" data-icao="${c.icao}">
       <td class="l"><b>${c.order}</b> ${esc(c.name)} <span class="mini">${c.icao}</span>${anyHot?'<span class="badge-hot">高温</span>':''}</td>
-      ${d.map(x=>`<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax)}</span><br><span class="mini">${unit==='C'?c2f(x.tmax)??'—':x.tmax??'—'}${unit==='C'?'F':'C'}</span></td>`).join('')}
+      ${d.map(x=>`<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax, x.tmax_disp, c.unit)}</span><br><span class="mini">${altUnit(x.tmax, c.unit)}</span></td>`).join('')}
       <td class="pm-live-cell">${d.map((x,i)=>x.pm_url?`<div class="pmday" data-slug="${slugOf(x.pm_url)}" data-tmax="${x.tmax??''}" title="${['今天','明天','后天'][i]} ${x.date}"><span class="dl">${['D0','D+1','D+2'][i]}</span><span class="pm-live"><span class="mini">加载中…</span></span></div>`:`<div class="pmday disabled"><span class="dl">${['D0','D+1','D+2'][i]}</span><span class="pm-live"><span class="mini">无市场</span></span></div>`).join('')}</td>
       <td><span class="mini">${d[0].n_models}</span></td>
       <td class="l">${pm}</td>
@@ -200,8 +222,8 @@ function openDrawer(icao){
     return `<div class="daycard">
       <div class="dc-label">${['今天 D0','明天 D+1','后天 D+2'][i]}</div>
       <div class="dc-date">${d.date}</div>
-      <div class="dc-temp ${heatCls(d.tmax)}">${fmtT(d.tmax)}</div>
-      <div class="dc-f">${unit==='C'?fmtT(c2f(d.tmax)).replace('°','°F'):fmtT((d.tmax-32)*5/9).replace('°','°C')}</div>
+      <div class="dc-temp ${heatCls(d.tmax)}">${fmtT(d.tmax, d.tmax_disp, c.unit)}</div>
+      <div class="dc-f">${altUnit(d.tmax, c.unit)}</div>
       <div style="margin:6px 0"><span class="conf ${d.conf||'低'}">置信度 ${d.conf||'—'}</span></div>
       <div class="mini">融合 ${d.n_models} 个模型（偏差修正后中位数）</div>
       <div style="margin-top:8px">${pm}</div>
@@ -217,7 +239,7 @@ function openDrawer(icao){
     const b=biasMap[m];
     modHtml+=`<tr><td class="l">${esc(m)}</td>${c.days.map(d=>{
       const v=d.models[m];
-      return `<td>${v==null?'<span class="mini">N/A</span>':fmtT(v)}</td>`;
+      return `<td>${v==null?'<span class="mini">N/A</span>':fmtT(v, null, c.unit)}</td>`;
     }).join('')}<td>${b?`<span class="${errCls(b.bias)}">${b.bias>0?'+':''}${b.bias}°</span> <span class="mini">n=${b.n}</span>`:'—'}</td></tr>`;
   }
   modHtml+='</tbody></table>';
@@ -226,7 +248,7 @@ function openDrawer(icao){
   for(const o of c.obs){
     const pd=c.days.find(x=>x.date===o.date);
     const e=pd&&pd.tmax!=null?pd.tmax-o.tmax:null;
-    obsHtml+=`<tr><td class="l">${o.date}</td><td>${fmtT(o.tmax)}</td><td>${pd?fmtT(pd.tmax):'—'}</td><td>${e!=null?`<span class="${errCls(e)}">${e>0?'+':''}${e.toFixed(1)}°</span>`:'—'}</td></tr>`;
+    obsHtml+=`<tr><td class="l">${o.date}</td><td>${fmtT(o.tmax, o.tmax_disp, c.unit)}</td><td>${pd?fmtT(pd.tmax, pd.tmax_disp, c.unit):'—'}</td><td>${e!=null?`<span class="${errCls(errDisp(e,c.unit))}">${errDisp(e,c.unit)>0?'+':''}${errDisp(e,c.unit).toFixed(0)}°</span>`:'—'}</td></tr>`;
   }
   obsHtml+='</tbody></table>';
   // 偏差修正
@@ -418,7 +440,8 @@ async function refreshDrawerPM(icao,i,pmUrl,tmax){
 }
 
 $('#search').oninput=e=>{filterText=e.target.value.trim();render();};
-$('#unitBtn').onclick=()=>{unit=unit==='C'?'F':'C';$('#unitBtn').textContent='°'+unit;render();};
+const UNIT_LABELS={P:'按城市',C:'°C',F:'°F'};
+$('#unitBtn').onclick=()=>{unitMode=unitMode==='P'?'C':(unitMode==='C'?'F':'P');$('#unitBtn').textContent=UNIT_LABELS[unitMode];render();};
 $('#darkBtn').onclick=()=>{document.body.classList.toggle('dark');$('#darkBtn').textContent=document.body.classList.contains('dark')?'☀️':'🌙';};
 $('#pmBtn').onclick=()=>refreshPolymarket();
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer();});
