@@ -285,6 +285,7 @@ function degInfo(q){
   if(m){
     const v=parseFloat(m[1]), unit=m[2].toUpperCase();
     const below=/below/i.test(m[3]||''), higher=/higher/i.test(m[3]||'');
+    const repC=unit==='F'?(v-32)*5/9:v;
     return {unit, label:`${v}°${unit}`, repC, loC:below?-300:repC, hiC:higher?300:repC, isRange:false};
   }
   return null;
