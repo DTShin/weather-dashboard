@@ -1,0 +1,70 @@
+name: wxtrack forecast refresh
+
+# 云端定时刷新气象看板：
+#   1) checkout 本仓(weather-dashboard, Pages 源)
+#   2) checkout 公开源码仓 DTShin/wxtrack 到 src/
+#   3) 跑全链路：抓 Open-Meteo 12 模型预报 -> 研判 -> 生成看板 -> 降雨 -> 刷 Polymarket 价(本地)
+#   4) 把 src/dashboard/* 拷到本仓根目录，git push 回自身(main)，GitHub Pages 自动重建
+# 全部公开 API、无密钥；GITHUB_TOKEN 已在本仓 settings/actions 开启 Read and write。
+on:
+  schedule:
+    - cron: "17 */6 * * *"        # 每 6 小时一次(UTC 00:17/06:17/12:17/18:17)
+  workflow_dispatch:              # 允许手动触发( Actions 页面 -> Run workflow )
+
+permissions:
+  contents: write                 # 推回本仓所需
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Pages repo (weather-dashboard)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout wxtrack source (public)
+        uses: actions/checkout@v4
+        with:
+          repository: DTShin/wxtrack
+          path: src
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r src/requirements.txt
+
+      - name: Run forecast pipeline
+        working-directory: src
+        run: |
+          python3 scripts/collect_forecast.py --skip-meteoblue
+          python3 scripts/predict.py
+          python3 scripts/gen_dashboard.py
+          python3 scripts/collect_precip.py --patch
+          python3 scripts/pm_refresh.py --no-push
+
+      - name: Validate generated data
+        working-directory: src
+        run: python3 -c "import json;d=json.load(open('dashboard/data.json'));assert d.get('cities'),'empty cities';print('cities:',len(d['cities']))"
+
+      - name: Copy dashboard to Pages root
+        run: |
+          cp -r src/dashboard/* .
+          [ -f src/dashboard/.nojekyll ] && cp src/dashboard/.nojekyll .
+          rm -rf src
+
+      - name: Commit and push
+        run: |
+          git config user.name "wxtrack-bot"
+          git config user.email "bot@dtshin.xyz"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes; skip"
+            exit 0
+          fi
+          git commit -m "data: $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push
