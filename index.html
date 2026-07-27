@@ -78,7 +78,7 @@ h3.sec{margin:18px 0 8px;font-size:14px;border-left:3px solid var(--accent);padd
 /* 降雨状态图标：研判温度后，高温时段持续降雨时显示 */
 .rain-ico{display:inline-block;margin-left:3px;font-size:13px;vertical-align:middle;cursor:help;filter:drop-shadow(0 0 1px var(--accent))}
 .rain-ico.soft{opacity:.5}
-/* 边界风险：预测贴近整数档边界(.5)时，推介整数可能翻档 */
+/* 边界风险：预测贴近整数档边界(整数处)，floor 取整规则下推介整数易翻档 */
 .edge{display:inline-block;margin-left:3px;font-size:11px;color:#e8a33d;font-weight:700;vertical-align:middle;cursor:help}
 .dc-temp .edge{font-size:13px}
 /* 城市外链按钮（Wunderground / METAR / Windy） */
@@ -237,7 +237,7 @@ function render(){
     const anyHot=d.some(x=>x.tmax>=38);
     html+=`<tr class="cityrow ${anyHot?'hl':''}" data-icao="${c.icao}">
       <td class="l"><b>${c.order}</b> ${esc(c.name)} <span class="mini">${c.icao}</span>${anyHot?'<span class="badge-hot">高温</span>':''}</td>
-      ${d.map(x=>`<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax, x.tmax_disp, c.unit)}</span>${rainHtml(x)}${x.edge_risk?'<span class="edge" title="预测贴近档位边界(.5)，推介整数可能翻档">⚠</span>':''}<br><span class="mini">${altUnit(x.tmax, c.unit)}</span></td>`).join('')}
+      ${d.map(x=>`<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax, x.tmax_disp, c.unit)}</span>${rainHtml(x)}${x.edge_risk?'<span class="edge" title="预测贴近整数档边界，floor 取整规则下推介整数易翻档">⚠</span>':''}<br><span class="mini">${altUnit(x.tmax, c.unit)}</span></td>`).join('')}
       <td class="pm-live-cell">${d.map((x,i)=>x.pm_url?`<div class="pmday" data-slug="${slugOf(x.pm_url)}" data-tmax="${x.tmax??''}" title="${['今天','明天','后天'][i]} ${x.date}"><span class="dl">${['D0','D+1','D+2'][i]}</span><span class="pm-live"><span class="mini">加载中…</span></span></div>`:`<div class="pmday disabled"><span class="dl">${['D0','D+1','D+2'][i]}</span><span class="pm-live"><span class="mini">无市场</span></span></div>`).join('')}</td>
       <td><span class="mini">${d[0].n_models}</span></td>
       <td class="l">${pm}</td>
@@ -262,7 +262,7 @@ function openDrawer(icao){
     return `<div class="daycard">
       <div class="dc-label">${['今天 D0','明天 D+1','后天 D+2'][i]}</div>
       <div class="dc-date">${d.date}</div>
-      <div class="dc-temp ${heatCls(d.tmax)}">${fmtT(d.tmax, d.tmax_disp, c.unit)} ${rainHtml(d)}${d.edge_risk?'<span class="edge" title="预测贴近档位边界(.5)，推介整数可能翻档">⚠</span>':''}</div>
+      <div class="dc-temp ${heatCls(d.tmax)}">${fmtT(d.tmax, d.tmax_disp, c.unit)} ${rainHtml(d)}${d.edge_risk?'<span class="edge" title="预测贴近整数档边界，floor 取整规则下推介整数易翻档">⚠</span>':''}</div>
       <div class="dc-f">${altUnit(d.tmax, c.unit)}</div>
       <div style="margin:6px 0"><span class="conf ${d.conf||'低'}">置信度 ${d.conf||'—'}</span></div>
       <div class="mini">融合 ${d.n_models} 个模型（偏差修正后中位数）</div>
