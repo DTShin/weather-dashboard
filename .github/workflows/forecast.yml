@@ -6,7 +6,7 @@ name: wxtrack forecast refresh
 #   3) 跑全链路：抓 Open-Meteo 12 模型预报 -> 研判 -> 生成看板 -> 降雨 -> 刷 Polymarket 价(本地)
 #   4) 把 src/dashboard/* 拷到本仓根目录，git push 回自身(main)，GitHub Pages 自动重建
 # 全部公开 API、无密钥；GITHUB_TOKEN 已在本仓 settings/actions 开启 Read and write。
-on:
+"on":
   schedule:
     - cron: "17 */6 * * *"        # 每 6 小时一次(UTC 00:17/06:17/12:17/18:17)
   workflow_dispatch:              # 允许手动触发( Actions 页面 -> Run workflow )
