@@ -2,10 +2,11 @@ name: wxtrack forecast refresh
 
 # 云端定时刷新气象看板（纯 shell，不依赖任何第三方 action，
 # 以兼容仓库「Actions 权限策略」可能限制第三方 action 的情况）：
-#   1) git clone 公开源码仓 DTShin/wxtrack
+#   1) 把公开源码仓 DTShin/wxtrack 克隆进工作区根目录（使 GITHUB_WORKSPACE 指向 wxtrack 根，
+#      保证 pm_refresh / gen_dashboard 等脚本的 ROOT 解析一致）
 #   2) 系统自带 python3 + pip 安装依赖
 #   3) 跑全链路：Open-Meteo 12 模型预报 -> 研判 -> 生成看板 -> 降雨 -> 刷 Polymarket 价(本地)
-#   4) git clone 本仓(weather-dashboard)，拷入 dashboard/*，用 GITHUB_TOKEN 推回(main)，Pages 自动重建
+#   4) 克隆本仓(weather-dashboard)到 out/，拷入 dashboard/*，用 GITHUB_TOKEN 推回(main)，Pages 自动重建
 # 全程公开 API、无密钥；GITHUB_TOKEN 已在本仓 settings/actions 开启 Read and write。
 "on":
   schedule:
@@ -18,20 +19,22 @@ permissions:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Clone wxtrack source (public)
-        run: git clone --depth 1 https://github.com/DTShin/wxtrack.git src
+      - name: Clone wxtrack source into workspace root
+        run: |
+          git clone --depth 1 https://github.com/DTShin/wxtrack.git _wxtmp
+          cp -r _wxtmp/. .
+          rm -rf .git _wxtmp
 
       - name: Install Python deps
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install -r src/requirements.txt
+          python3 -m pip install -r requirements.txt
 
       - name: Run forecast pipeline
-        working-directory: src
         run: |
           python3 scripts/collect_forecast.py --skip-meteoblue
           python3 scripts/predict.py
@@ -40,15 +43,14 @@ jobs:
           python3 scripts/pm_refresh.py --no-push
 
       - name: Validate generated data
-        working-directory: src
         run: python3 -c "import json;d=json.load(open('dashboard/data.json'));assert d.get('cities'),'empty cities';print('cities:',len(d['cities']))"
 
       - name: Clone Pages repo and publish
         run: |
           git clone --depth 1 https://x-access-token:${GH_TOKEN}@github.com/DTShin/weather-dashboard.git out
           cd out
-          cp -r ../src/dashboard/* .
-          [ -f ../src/dashboard/.nojekyll ] && cp ../src/dashboard/.nojekyll .
+          cp -r ../dashboard/* .
+          [ -f ../dashboard/.nojekyll ] && cp ../dashboard/.nojekyll .
           git config user.name "wxtrack-bot"
           git config user.email "bot@dtshin.xyz"
           git add -A
