@@ -15,6 +15,7 @@ name: wxtrack forecast refresh
 
 permissions:
   contents: write                 # 推回本仓所需
+  pages: write                    # 推送后显式触发 Pages 重建
 
 jobs:
   refresh:
@@ -60,3 +61,9 @@ jobs:
           fi
           git commit -m "data: $(date -u +%Y-%m-%dT%H:%MZ)"
           git push
+          # 显式触发 Pages 重建（legacy 从分支构建有时不自动触发）
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/DTShin/weather-dashboard/pages/builds \
+            && echo "Pages rebuild triggered" || echo "Pages rebuild trigger skipped"
