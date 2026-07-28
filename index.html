@@ -122,21 +122,24 @@ const c2f=c=>c==null?null:+(c*9/5+32).toFixed(1);
 // 单位模式：P=按城市 Polymarket 档位（美国°F/其余°C）；C=强制°C；F=强制°F
 const dispUnit=cityUnit=>unitMode==='P'?cityUnit:(unitMode==='C'?'C':'F');
 // 展示整数温度：vC=°C 原始值；dispInt=该城市单位下已取整值（Polymarket 模式优先用，保证整数）
+// vC: 原始 °C 值（后端 tmax_raw）；dispInt: 该城市展示单位下已 floor 取整的整数（Polymarket 档）
+// 约定：前端所有温度都以「原始 °C」为唯一真值，再按当前单位模式换算；禁止对已是展示单位的 tmax 二次换算。
 function fmtT(vC, dispInt, cityUnit){
   if(vC==null&&dispInt==null)return '—';
-  const u=dispUnit(cityUnit);
-  if(u==='F'){
-    const base=vC!=null?vC:(dispInt!=null?(cityUnit==='F'?dispInt:(dispInt-32)*5/9):null);
-    return Math.round(base*9/5+32)+'°F';
-  }
-  const base=vC!=null?vC:(dispInt!=null?(cityUnit==='C'?dispInt:dispInt*9/5+32):null);
-  return Math.round(base)+'°C';
+  const u=dispUnit(cityUnit); // 始终为 '°C' 或 '°F'
+  // Polymarket 模式（按城市）且城市原生单位即展示单位 → 直接用后端预计算的 floor 整数档，保证与推介档一致
+  if(u===cityUnit && dispInt!=null) return dispInt+u;
+  let v=vC;
+  if(v==null) v=(u==='°F')?(dispInt-32)*5/9:dispInt;
+  if(v==null)return '—';
+  const num=(u==='°F'?Math.round(v*9/5+32):Math.round(v));
+  return num+u;
 }
-// 副单位（与展示单位相反）
+// 副单位（与展示单位相反）：vC 为原始 °C
 function altUnit(vC, cityUnit){
   if(vC==null)return '—';
   const u=dispUnit(cityUnit);
-  return u==='F'?Math.round(vC)+'°C':Math.round(vC*9/5+32)+'°F';
+  return u==='°F'?Math.round(vC)+'°C':Math.round(vC*9/5+32)+'°F';
 }
 // 误差（按当前展示单位）
 function errDisp(eC, cityUnit){
@@ -229,7 +232,7 @@ function render(){
   cities.sort((a,b)=>{
     let va,vb;
     if(sortKey==='order'){va=a.order;vb=b.order;}
-    else if(sortKey.startsWith('d')){const i=+sortKey[1];va=a.days[i].tmax??-999;vb=b.days[i].tmax??-999;}
+    else if(sortKey.startsWith('d')){const i=+sortKey[1];va=a.days[i].tmax_raw??-999;vb=b.days[i].tmax_raw??-999;}
     else if(sortKey==='obs'){va=a.obs[0]?.tmax??-999;vb=b.obs[0]?.tmax??-999;}
     return sortAsc?va-vb:vb-va;
   });
@@ -246,17 +249,17 @@ function render(){
     if(obs){
       obsCell=`<span class="temp">${fmtT(obs.tmax, obs.tmax_disp, c.unit)}</span><br><span class="mini">${obs.date.slice(5)}</span>`;
       const pd=d.find(x=>x.date===obs.date);
-      if(pd&&pd.tmax!=null){
-        const e=errDisp(pd.tmax-obs.tmax, c.unit);
+      if(pd&&pd.tmax_raw!=null){
+        const e=errDisp(pd.tmax_raw-obs.tmax, c.unit);
         errCell=`<span class="${errCls(e)}">${e>0?'+':''}${e.toFixed(0)}°</span>`;
       }
     }
     const pm=DAY_ORDER.map((di,k)=>{const x=c.days[di];return x.pm_url?`<a class="pm ${x.pm_verified?'verified':''}" href="${x.pm_url}" target="_blank" title="${DAY_LABELS[k]} ${x.date}">D${di}</a>`:`<span class="pm disabled">D${di}</span>`;}).join('');
-    const anyHot=d.some(x=>x.tmax>=38);
+    const anyHot=d.some(x=>x.tmax_raw>=38);
     html+=`<tr class="cityrow ${anyHot?'hl':''}" data-icao="${c.icao}">
       <td class="l"><b>${c.order}</b> ${esc(c.name)} <span class="mini">${c.icao}</span>${anyHot?'<span class="badge-hot">高温</span>':''}</td>
-      ${DAY_ORDER.map(di=>{const x=c.days[di];return `<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax)}">${fmtT(x.tmax, x.tmax_disp, c.unit)}</span>${rainHtml(x)}${x.edge_risk?'<span class="edge" title="预测贴近整数档边界，floor 取整规则下推介整数易翻档">⚠</span>':''}<br><span class="mini">${altUnit(x.tmax, c.unit)}</span></td>`;}).join('')}
-      <td class="pm-live-cell">${DAY_ORDER.map((di,k)=>{const x=c.days[di];return x.pm_url?`<div class="pmday" data-slug="${slugOf(x.pm_url)}" data-tmax="${x.tmax??''}" title="${DAY_LABELS[k]} ${x.date}"><span class="dl">D${di}</span><span class="pm-live"><span class="mini">加载中…</span></span></div>`:`<div class="pmday disabled"><span class="dl">D${di}</span><span class="pm-live"><span class="mini">无市场</span></span></div>`;}).join('')}</td>
+      ${DAY_ORDER.map(di=>{const x=c.days[di];return `<td title="置信度${x.conf||'—'} · ${x.n_models}个模型"><span class="cdot ${x.conf||'none'}"></span><span class="temp ${heatCls(x.tmax_raw)}">${fmtT(x.tmax_raw, x.tmax_disp, c.unit)}</span>${rainHtml(x)}${x.edge_risk?'<span class="edge" title="预测贴近整数档边界，floor 取整规则下推介整数易翻档">⚠</span>':''}<br><span class="mini">${altUnit(x.tmax_raw, c.unit)}</span></td>`;}).join('')}
+      <td class="pm-live-cell">${DAY_ORDER.map((di,k)=>{const x=c.days[di];return x.pm_url?`<div class="pmday" data-slug="${slugOf(x.pm_url)}" data-tmax="${x.tmax_raw??''}" title="${DAY_LABELS[k]} ${x.date}"><span class="dl">D${di}</span><span class="pm-live"><span class="mini">加载中…</span></span></div>`:`<div class="pmday disabled"><span class="dl">D${di}</span><span class="pm-live"><span class="mini">无市场</span></span></div>`;}).join('')}</td>
       <td><span class="mini">${c.days[DAY_ORDER[0]].n_models}</span></td>
       <td class="l">${pm}</td>
       <td>${extLinks(c)}</td>
@@ -281,8 +284,8 @@ function openDrawer(icao){
     return `<div class="daycard">
       <div class="dc-label">${DAY_LABELS[k]} · D${di}</div>
       <div class="dc-date">${d.date}</div>
-      <div class="dc-temp ${heatCls(d.tmax)}">${fmtT(d.tmax, d.tmax_disp, c.unit)} ${rainHtml(d)}${d.edge_risk?'<span class="edge" title="预测贴近整数档边界，floor 取整规则下推介整数易翻档">⚠</span>':''}</div>
-      <div class="dc-f">${altUnit(d.tmax, c.unit)}</div>
+      <div class="dc-temp ${heatCls(d.tmax_raw)}">${fmtT(d.tmax_raw, d.tmax_disp, c.unit)} ${rainHtml(d)}${d.edge_risk?'<span class="edge" title="预测贴近整数档边界，floor 取整规则下推介整数易翻档">⚠</span>':''}</div>
+      <div class="dc-f">${altUnit(d.tmax_raw, c.unit)}</div>
       <div style="margin:6px 0"><span class="conf ${d.conf||'低'}">置信度 ${d.conf||'—'}</span></div>
       <div class="mini">融合 ${d.n_models} 个模型（偏差修正后中位数）</div>
       <div style="margin-top:8px">${pm}</div>
@@ -306,8 +309,8 @@ function openDrawer(icao){
   let obsHtml='<table class="modtable"><thead><tr><th class="l">日期</th><th>实测</th><th>研判</th><th>误差</th></tr></thead><tbody>';
   for(const o of c.obs){
     const pd=c.days.find(x=>x.date===o.date);
-    const e=pd&&pd.tmax!=null?pd.tmax-o.tmax:null;
-    obsHtml+=`<tr><td class="l">${o.date}</td><td>${fmtT(o.tmax, o.tmax_disp, c.unit)}</td><td>${pd?fmtT(pd.tmax, pd.tmax_disp, c.unit):'—'}</td><td>${e!=null?`<span class="${errCls(errDisp(e,c.unit))}">${errDisp(e,c.unit)>0?'+':''}${errDisp(e,c.unit).toFixed(0)}°</span>`:'—'}</td></tr>`;
+    const e=pd&&pd.tmax_raw!=null?pd.tmax_raw-o.tmax:null;
+    obsHtml+=`<tr><td class="l">${o.date}</td><td>${fmtT(o.tmax, o.tmax_disp, c.unit)}</td><td>${pd?fmtT(pd.tmax_raw, pd.tmax_disp, c.unit):'—'}</td><td>${e!=null?`<span class="${errCls(errDisp(e,c.unit))}">${errDisp(e,c.unit)>0?'+':''}${errDisp(e,c.unit).toFixed(0)}°</span>`:'—'}</td></tr>`;
   }
   obsHtml+='</tbody></table>';
   // 偏差修正
@@ -328,7 +331,7 @@ function openDrawer(icao){
     <p class="mini" style="margin-top:14px">修正方式：fc_corrected = fc − bias30；综合研判 = 全模型修正后中位数；置信度按模型间离散度划分（≤1°C高 / ≤2.5°C中 / 否则低）</p>`;
   $('#drawer').classList.add('open');
   $('#overlay').classList.add('show');
-  DAY_ORDER.forEach(di=>{const d=c.days[di];refreshDrawerPM(c.icao,di,d.pm_url,d.tmax);});
+  DAY_ORDER.forEach(di=>{const d=c.days[di];refreshDrawerPM(c.icao,di,d.pm_url,d.tmax_raw);});
 }
 function closeDrawer(){$('#drawer').classList.remove('open');$('#overlay').classList.remove('show');}
 
